@@ -1,0 +1,117 @@
+---
+title: "CNN Plot Remake with ggplot"
+output: html_document
+date: "2025-04-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggtext)
+library(scales)
+library(glue) # for working with text and labels
+library(glitr) # Custom ggplot2 
+```
+
+## CNN Tarrif Plot Remake
+Having remade the graphic using python with seaborn and matplotlib, I will now remake the plot using ggplot. The first step is to read in the data. In python, we worked with a wide data frame because we built the plot by looping across columns. In R, it's much more efficient to work with a long data frame. In fact, ggplot2's facets work really well with long data frames. Below, I will read in the data and reshape it, set a new colunm that captures the color mapping used for each topic, and reset the level of the factors so they appear in our desired order rather than alphabetical order -- as is this is the default order when working with factors. 
+
+```{r data}
+
+d_path = "Documents/Github/python_viz/cnn_data.csv"
+
+df <- read_csv(d_path) %>% 
+  select(-`...1`) %>%  # Drop index as this will not be needed for ggplot2
+  pivot_longer(cols = hurt:help, # reshape into a long data frame to use facets
+               values_to = "percent",
+               names_to = "topic") %>% 
+  # Map custom colors to topics so we can apply scale_fill_identity()
+  mutate(topic_color = case_when( 
+           topic == "hurt" ~ "#f18851",
+           topic == "neither" ~ "#b1b1b1",
+           topic == "help" ~ "#52a795",
+           TRUE ~ NA_character_
+         ),
+         # Reorder topics into our specified order
+         topic = (fct_relevel(topic %>% str_to_title, c("Hurt", "Neither", "Help"))),
+         q_order = fct_inorder(q), # sets factors in the order which they appear on read-in
+         label_color = ifelse(topic == "Neither", "black", "white")
+  )
+         
+
+
+glimpse(df)
+```
+
+## Build out titles, labels, and captions
+
+
+```{r caption, echo=FALSE}
+cnn_caption <- glue("{str_wrap('Methodology: The latest CNN poll was conducted by SSRS online or by phone from April 17–24 among a random national sample of 1,678 US adults drawn from either a probability-based panel or from a voter file. Results shown in this chart have a margin of sampling error of up to ±2.9 percentage points.', width = 170)},
+\nSource: CNN/SSRS polling\nGraphic: Original by Ariel Edwards-Levy, CNN – Reproduced by Tim Essam on 2025-04-30
+")
+
+cnn_caption
+```
+```{r title}
+plot_title = glue("Most expect negative short term-effects from tariffs, with a smaller majority saying they'll hurt the economy long-term")
+plot_title
+
+plot_subtitle = glue("Share saying Trump's policies on tariffs will:")
+```
+
+## Build the plot
+With the data reshaped and prepped and the text generated as objects, we are ready to start building our ggplot. Ggplot renders geoms from top to bottom based on the code order. For this reproduction, we will want to first build a background column plot that runs to .72 to represent the grey fill behind the colored column bars. I make use of the `fct_rev()` function to dynamically reverse the order in which the factors appear on the y-axis. 
+
+```{r plot_base}
+plot_base <- 
+  df %>% 
+  ggplot(aes(y = fct_rev(q_order))) +
+  geom_col(aes(x = 0.72), fill = "#f5f5f5", width = 0.75) +
+  #facet_wrap(~topic, nrow = 1)
+  facet_grid(~topic)
+
+plot_base
+```
+With the foundation taken care off, we can now add in our survey values as columns by appending code to the original plot object. We'll start by creating a `geom_col()` to plot the responses across each topic. Next, we map the color from the data frame to the column color using the `scale_fill_identity()` function. Finally, we use some of `glitr`'s presets to strip away all extra formatting. 
+```{r add_results}
+plot_response <- 
+  plot_base +
+  geom_col(aes(x = percent, fill = topic_color), width = 0.75) +
+  scale_fill_identity() +
+  glitr::si_style_nolines(facet_space = 0.5) # strips extra formatting
+
+plot_response
+```
+With things looking good, we only have a few tasks left. First, we need to adorn our plot with the text objects we created above. We need to add some percentage labels to the columns, and we need to remove the x and y axis labels and ticks. I use `geom_text()` to add percentage labels to each of the bars. `scale_color_identity()` maps the `label_color` object to the font colors to get the alternating white-black pattern. Within the `labs()` function I pass the text objects to their appropriate positions. Finally, some additional cleanup is done using the theming options.
+
+```{r layer_text, fig.width=15, fig.height=4}
+final_plot <- plot_response +
+  geom_text(aes(x = 0.035,  # Configure position of labels as well as appearance
+                label = percent(percent),
+                color = label_color),
+            family = "Arial",
+            size = 9/.pt,
+            fontface = "bold") +
+  scale_color_identity() +
+  labs(title = plot_title, # Layer in the text to appropriate parts of plot
+       subtitle = plot_subtitle,
+       caption = cnn_caption,
+       x = NULL, y = NULL) +
+  theme(plot.caption = element_text(hjust = 0), # Moves plot caption from right to left
+        axis.text.x = element_blank(), # removes axis text from x-axis
+        strip.text = element_text(hjust = 0.05)) # nudges the facet labels to the right a tiny bit
+  # left align caption
+
+final_plot
+```
+
+```{r save the plot}
+  
+ggsave("Documents/Github/python_viz/CNN_tarrif_remake_ggplot.png", width = 15, height = 4)
+
+```
+
+## Reflections 
+In this blog post I have outlined two methods for recreating a faceted bar graph that depicts how American's feel about the Trump Administration's tarrifs. Each approach has it's relative merits and drawbacks. With Python, I had to develop a looping method to create three seaborn barplots aligned on a pre-specified grid. This also required the data to be set up in a wide format. With R and ggplot, the method was much more straightforward as long as the data was reshaped long. My main takeaway from this is not that Python or R is better, but that a visualization creator needs to understand how each library expects data to be organized to create a desired plot. 
